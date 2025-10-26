@@ -13,25 +13,28 @@ public class IntegrationTestFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await Task.WhenAll();
+        await DockerStarter.StartDockerContainerAsync();
+        Database.Setup();
+
         var webApplicationFactory = CreateWebApplicationFactory();
         _webApplicationFactory = webApplicationFactory;
     }
 
     public Task DisposeAsync()
     {
+        Database.DeleteAll();
+
         return Task.CompletedTask;
     }
 
-    protected WebApplicationFactory<Program> CreateWebApplicationFactory()
+    private WebApplicationFactory<Program> CreateWebApplicationFactory()
     {
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             var config = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    // { "ConnectionStrings:MongoDBConnection", _mongoDbContainer.GetConnectionStringForDatabase("campaigns") },
-                    // { "ConnectionStrings:StudioStorage", _azuriteContainer.GetConnectionString() },
+                    // if you want to override any configuration settings for tests, do it here
                 })
                 .AddEnvironmentVariables()
                 .Build();
@@ -40,12 +43,12 @@ public class IntegrationTestFixture : IAsyncLifetime
 
             builder.ConfigureServices(services =>
             {
-
+                // any additional service configuration for tests can be done here
             });
 
             builder.ConfigureTestServices(services =>
             {
-
+                // any test-specific service configuration can be done here
             });
 
             builder.UseTestServer();

@@ -12,7 +12,13 @@ app.MapGet("/", () =>
 
 app.MapGet("/order/{id}", ([FromRoute] int id) =>
 {
-    return Results.Ok(new Order(id, "Sample Item", 1));
+    var order = Database.Select(id);
+    if (order is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.Ok(order);
 });
 
 app.MapPost("/order", ([FromBody] Order order) =>
@@ -22,15 +28,10 @@ app.MapPost("/order", ([FromBody] Order order) =>
         return Results.BadRequest("Must provide a valid quantity");
     }
 
-    return Results.Ok("Order received");
-});
+    var id = Database.InsertOrder(order.Item, order.Quantity);
 
-app.MapPut("/order", ([FromBody] Order order) =>
-{
-    return Results.Ok("Order has been updated");
+    return Results.Ok(Database.Select(id));
 });
-
-app.MapDelete("/order", ([FromBody] Order order) => Results.NoContent());
 
 app.Run();
 
