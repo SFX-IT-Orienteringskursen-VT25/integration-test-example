@@ -1,5 +1,8 @@
-﻿using Docker.DotNet;
+﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Docker.DotNet;
 using Docker.DotNet.Models;
+using Microsoft.Data.SqlClient;
 
 namespace OrderApi.IntegrationTests;
 
@@ -7,33 +10,34 @@ public static class DockerStarter
 {
     public static async Task StartDockerContainerAsync()
     {
-        // This only works on Windows. For Linux or MacOS, use "unix:///var/run/docker.sock"
-        var dockerClient = new DockerClientConfiguration(new Uri("npipe://./pipe/docker_engine")).CreateClient();
+        var dockerUri = GetDockerUri();
+        var dockerClient = new DockerClientConfiguration(dockerUri).CreateClient();
 
-        try
-        {
-            await dockerClient.Images.CreateImageAsync(
-                new ImagesCreateParameters { FromImage = "mcr.microsoft.com/mssql/server", Tag = "2022-latest" },
-                null,
-                new Progress<JSONMessage>());
-        }
-        catch (TimeoutException timeoutException)
-        {
-            var message = "You have probably forgotten to start Docker Desktop";
-            Console.WriteLine(message);
-            throw new Exception(message, timeoutException);
-        }
+        await dockerClient.Images.CreateImageAsync(
+            new ImagesCreateParameters { FromImage = "mcr.microsoft.com/mssql/server", Tag = "2022-latest" },
+            null,
+            new Progress<JSONMessage>());
 
-        if (await StartContainerIfItExists(dockerClient)) return;
+        if (await StartContainerIfItExists(dockerClient))
+        {
+            await WaitForSqlServerReadyAsync(TimeSpan.FromSeconds(10));
+            return;
+        }
 
         var container = await CreateContainer(dockerClient);
+        await StartContainerGracefully(dockerClient, container.ID);
 
-        await dockerClient.Containers.StartContainerAsync(container.ID, new ContainerStartParameters()
-        {
+        await WaitForSqlServerReadyAsync(TimeSpan.FromSeconds(40));
+    }
 
-        });
+    private static Uri GetDockerUri()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return new Uri("npipe://./pipe/docker_engine");
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return new Uri("unix:///var/run/docker.sock");
 
-        await WaitForSqlToBeReady(TimeSpan.FromSeconds(60));
+        throw new PlatformNotSupportedException("Unsupported OS platform for Docker connection.");
     }
 
     private static async Task<bool> StartContainerIfItExists(DockerClient dockerClient)
@@ -49,7 +53,7 @@ public static class DockerStarter
         {
             if (existing.State != "running")
             {
-                await dockerClient.Containers.StartContainerAsync(existing.ID, new ContainerStartParameters());
+                await StartContainerGracefully(dockerClient, existing.ID);
             }
 
             return true;
@@ -58,24 +62,17 @@ public static class DockerStarter
         return false;
     }
 
-    private static async Task WaitForSqlToBeReady(TimeSpan timeout)
+    private static async Task StartContainerGracefully(DockerClient dockerClient, string containerId)
     {
-        var startTime = DateTime.UtcNow;
-        while (DateTime.UtcNow - startTime < timeout)
+        try
         {
-            try
-            {
-                Database.CheckIfDatabaseIsReady();
-                return;
-            }
-            catch
-            {
-                // SQL isn't up yet
-                await Task.Delay(2000);
-            }
+            await dockerClient.Containers.StartContainerAsync(containerId, new ContainerStartParameters());
         }
-
-        throw new TimeoutException("SQL Server did not become ready in time.");
+        catch (DockerApiException dockerApiException) when (dockerApiException.Message.Contains("port is already allocated"))
+        {
+            await RemoveConflictingContainersOnPortAsync(dockerClient, "1433");
+            await dockerClient.Containers.StartContainerAsync(containerId, new ContainerStartParameters());
+        }
     }
 
     private static async Task<CreateContainerResponse> CreateContainer(DockerClient dockerClient)
@@ -102,5 +99,48 @@ public static class DockerStarter
             }
         });
         return container;
+    }
+
+    private static async Task RemoveConflictingContainersOnPortAsync(DockerClient dockerClient, string port)
+    {
+        var containers = await dockerClient.Containers.ListContainersAsync(new ContainersListParameters { All = true });
+        foreach (var container in containers)
+        {
+            if (container.Ports != null && container.Ports.Any(p => p.PublicPort == int.Parse(port) && p.Type == "tcp"))
+            {
+                if (container.State == "running")
+                {
+                    await dockerClient.Containers.StopContainerAsync(container.ID, new ContainerStopParameters());
+                }
+
+                await dockerClient.Containers.RemoveContainerAsync(container.ID, new ContainerRemoveParameters { Force = true });
+            }
+        }
+    }
+
+    private static async Task WaitForSqlServerReadyAsync(TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            try
+            {
+                await using var sqlConnection = new SqlConnection($"Server=localhost,1433;Database=master;User Id=sa;Password={SqlCredentials.Password};TrustServerCertificate=True;");
+                await sqlConnection.OpenAsync();
+                await using var cmd = sqlConnection.CreateCommand();
+                cmd.CommandText = "SELECT 1";
+                await cmd.ExecuteScalarAsync();
+
+                return;
+            }
+            catch
+            {
+                // ignored
+            }
+
+            await Task.Delay(1000);
+        }
+
+        throw new TimeoutException($"SQL Server did not become available within {timeout.TotalSeconds} seconds.");
     }
 }

@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace OrderApi.IntegrationTests;
 
@@ -10,19 +11,20 @@ public class IntegrationTestFixture : IAsyncLifetime
     private WebApplicationFactory<Program>? _webApplicationFactory;
     public WebApplicationFactory<Program> WebApplicationFactory => _webApplicationFactory
                                                                     ?? throw new InvalidOperationException("WebApplicationFactory has not been initialized.");
+    public Database GetDatabase() => WebApplicationFactory.Services.GetRequiredService<Database>();
 
     public async Task InitializeAsync()
     {
         await DockerStarter.StartDockerContainerAsync();
-        Database.Setup();
 
         var webApplicationFactory = CreateWebApplicationFactory();
         _webApplicationFactory = webApplicationFactory;
+        GetDatabase().Setup();
     }
 
     public Task DisposeAsync()
     {
-        Database.DeleteAll();
+        GetDatabase().DeleteAll();
 
         return Task.CompletedTask;
     }

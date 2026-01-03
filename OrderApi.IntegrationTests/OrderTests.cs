@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace OrderApi.IntegrationTests;
 
@@ -9,7 +10,7 @@ public class OrderTests(IntegrationTestFixture fixture) : IClassFixture<Integrat
     public async Task GivenNonExistentOrder_WhenGettingOrder_ThenNotFound()
     {
         // Arrange
-        Database.DeleteAll();
+        fixture.GetDatabase().DeleteAll();
         var client = fixture.WebApplicationFactory.CreateClient();
 
         // Act
@@ -40,7 +41,7 @@ public class OrderTests(IntegrationTestFixture fixture) : IClassFixture<Integrat
         var item = "Apple iPhone";
         var quantity = 2;
         var client = fixture.WebApplicationFactory.CreateClient();
-        var id = Database.InsertOrder(item, quantity);
+        var id = fixture.GetDatabase().InsertOrder(item, quantity);
 
         // Act
         var order = await client.GetFromJsonAsync<Order>($"/order/{id}");

@@ -2,20 +2,12 @@
 
 namespace OrderApi;
 
-/// <summary>
-/// For the record.
-///
-/// This is not good code, nor an example of how to write a data access layer.
-/// This is a quick hack that serves the purpose of having a smaller amount of code and no real dependencies.
-///
-/// Generally things should be setup with proper repositories using dependency injection. Static should be avoided.
-/// </summary>
-public static class Database
+public class Database
 {
     private const string TableName = "Orders";
     private const string DbName = "OrderDb";
 
-    public static void Setup()
+    public void Setup()
     {
         using var sqlConnection = CreateConnection();
         using var createDbCommand = sqlConnection.CreateCommand();
@@ -36,14 +28,14 @@ public static class Database
         createTableCommand.ExecuteNonQuery();
     }
 
-    public static void CheckIfDatabaseIsReady()
+    public void CheckIfDatabaseIsReady()
     {
         using var sqlConnection = CreateConnection();
         using var healthCheckCommand = new SqlCommand("SELECT 1", sqlConnection);
         healthCheckCommand.ExecuteScalarAsync();
     }
 
-    public static int InsertOrder(string item, int quantity)
+    public int InsertOrder(string item, int quantity)
     {
         using var sqlConnection = CreateConnection();
         using var insertCommand = sqlConnection.CreateCommand();
@@ -60,7 +52,7 @@ public static class Database
         return insertedId;
     }
 
-    public static Order? Select(int id)
+    public Order? Select(int id)
     {
         using var sqlConnection = CreateConnection();
         using var selectCommand = sqlConnection.CreateCommand();
@@ -82,7 +74,7 @@ public static class Database
         return null;
     }
 
-    public static void DeleteAll()
+    public void DeleteAll()
     {
         using var sqlConnection = CreateConnection();
         using var deleteAllCommand = sqlConnection.CreateCommand();
@@ -92,7 +84,7 @@ public static class Database
         deleteAllCommand.ExecuteNonQuery();
     }
 
-    private static SqlConnection CreateConnection()
+    private SqlConnection CreateConnection()
     {
         var sqlConnection = new SqlConnection($"Server=localhost,1433;Database=master;User Id=sa;Password={SqlCredentials.Password};TrustServerCertificate=True;");
         sqlConnection.Open();
